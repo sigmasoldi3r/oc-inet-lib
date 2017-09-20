@@ -73,7 +73,7 @@ function net.parseHeaders(raw)
     local s = raw:sub(j,j);
     if (s == '\n') then
       local rawHeader = table.concat(buffer);
-      local k, v = rawHeader:match('(.-)%=(.-)');
+      local k, v = rawHeader:match('(.-)=(.+)');
       headers[k] = v;
       buffer = {};
       if (raw:sub(j+1, j+1) == '\n') then
