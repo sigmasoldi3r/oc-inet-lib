@@ -1,5 +1,21 @@
-# oc-inet-lib
-Opencomputers Internal networking API
+# OC LAN framework
+
+Opencomputers Local Area Networking framework
+
+This *framework* or **small set of libraries** will contain simple ways to
+comunicate two computers easily, keeping it *simple*, don't expect a heavy
+overhead like cryptography at this moment, that can be implemented on top of
+this framework. (That does not exclude it from grow with the community help
+ofcourse! And may be at some point new things can be added)
+
+* * *
+
+# UPDATE: Below is pending on change
+
+As the current releases only range from 0.0, there will be a major release
+v1.0.0 soon, which will break all what is being tested under this alpha stage.
+
+So the API mentioned below will be different soon.
 
 * * *
 
