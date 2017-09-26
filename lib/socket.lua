@@ -12,6 +12,55 @@ local event = require('event');
 local socket = {};
 
 --[[--
+  Generator function creates a filter function for the modem that filters by
+  port and by incoming client address.
+  @param {number} portSetup
+  @param {string} addressSetup
+  @returns {function}
+--]]--
+function socket.filterIncoming(portSetup, addressSetup)
+  return function(evt, _, address, port)
+    return evt == 'modem_message' and port == portSetup and address == addressSetup;
+  end
+end
+
+--[[--
+  Generator function creates a filter-by-port filter function for the modem
+  messages.
+  @param {number} portSetup
+  @returns {function}
+--]]--
+function socket.filterByPort(portSetup)
+  return function(evt, _, _, port)
+    return evt == 'modem_message' and port == portSetup;
+  end
+end
+
+--[[--
+  Crops the payload from the message header.
+  @param {string} raw
+  @returns {string}
+--]]--
+function socket.cropPayload(raw)
+  return raw:sub(2, raw:len());
+end
+
+--[[--
+  P
+--]]--
+function socket.pullEvent(filter)
+  local args = {event.pullFiltered(filter)};
+  return {
+    event = args[1],
+    localhost = args[2],
+    remote = args[3],
+    port = args[4],
+    distance = args[5],
+    message = args[6]
+  };
+end
+
+--[[--
   Prototype: Socket
   @author sigmasoldier
 --]]--
@@ -34,15 +83,25 @@ function socket.__Socket:send(message)
     error('Socket is closed');
   end
   self:sendRaw(table.concat{'M', message});
+  local response = socket.pullEvent(self.filter);
+  local h = response.message:sub(1,1);
+  if (h == 'C') then
+    self:clean();
+    if (self.onCloseHandler) then
+      self:onCloseHandler();
+    end
+  elseif (h == 'M') then
+    return socket.cropPayload(response.message), response.distance;
+  else
+    error('Uncaught error: "'..h..'" is not a valid header for the packet.');
+  end
 end
 
 --[[--
   Opens the socket, sends the open request signal.
+  @param {function} handler
 --]]--
-function socket.__Socket:open(handler)
-  modem.open(self.port);
-  self.handler = handler;
-  event.listen('modem_message', self._handler);
+function socket.__Socket:open()
   self:sendRaw('O');
   self.isOpen = true;
 end
@@ -68,26 +127,7 @@ end
   Releases the resources of the socket like listeners...
 --]]--
 function socket.__Socket:clean()
-  event.ignore(self._handler);
   self.isOpen = false;
-end
-
---[[--
-  Crops the payload from the message header.
-  @param {string} raw
-  @returns {string}
---]]--
-function socket.cropPayload(raw)
-  return raw:sub(2, raw:len());
-end
-
---[[--
-  Crops the payload and sends it to the client handler.
-  @param {string} payload
-  @param {number} distance
---]]--
-function socket.__Socket:consume(payload, distance)
-  self.handler(socket.cropPayload(payload), distance);
 end
 
 --[[--
@@ -96,34 +136,20 @@ end
 function socket.Socket(address, port)
   local self = {};
 
+  modem.open(port);
+
   self.address = address;
   self.port = port;
   self.isOpen = false;
+  self.filter = socket.filterIncoming(self.port, self.address);
+
   -- Manually set the pointers to functions:
-  self.consume = socket.__Socket.consume;
   self.clean = socket.__Socket.clean;
   self.onClose = socket.__Socket.onClose;
   self.close = socket.__Socket.close;
   self.send = socket.__Socket.send;
   self.sendRaw = socket.__Socket.sendRaw;
   self.open = socket.__Socket.open;
-
-  self._handler = function(evt, localAddr, remoteAddr, port, distance, payload)
-    if (remoteAddr == address and port == self.port) then
-      local h = payload:sub(1,1);
-      if (h == 'C') then
-        if (self.onCloseHandler) then
-          self:onCloseHandler();
-        end
-        self:clean();
-      elseif (h == 'M') then
-        self:consume(payload, distance);
-      else
-        error('Uncaught error: "'..h..'" is not a valid header for the packet.');
-      end
-    end
-    -- Else ignore, the message is not for this socket.
-  end
 
   return self;
 end
@@ -135,12 +161,47 @@ end
 socket.__SocketServer = {};
 
 --[[--
+  When ready, calls the handler and passes the new instance.
+  @param {Socket} client
+--]]--
+function socket.__SocketServer:onReady(client)
+  self.handler(client);
+end
+
+--[[--
   Listens the given port for an incoming
 --]]--
 function socket.__SocketServer:listen(handler)
   modem.open(self.port);
   self.handler = handler;
-  event.listen('modem_message', self._handler);
+  local openFilter = socket.filterByPort(self.port);
+  while (not self.isOpen) do
+    local response = socket.pullEvent(openFilter);
+    if (response.message:sub(1,1) == 'O') then
+      self.address = response.remote;
+      self.isOpen = true;
+      local client = socket.Socket(self.address, self.port);
+      client.isOpen = true;
+      self:onReady(client);
+    end
+  end
+  --[[
+  local handleFilter = socket.filterIncoming(self.port, self.address);
+  while (self.isOpen) do
+    local response = socket.pullEvent(handleFilter);
+    local h = response.message:sub(1,1);
+    if (h == 'C') then
+      self:clean();
+      if (self.onCloseHandler) then
+        self:onCloseHandler();
+      end
+    elseif (h == 'M') then
+      self:consume(response.message, response.distance);
+    else
+      error('Uncaught error: "'..h..'" is not a valid header for the packet.');
+    end
+  end
+  ]]--
 end
 
 --[[--
@@ -150,38 +211,22 @@ end
 function socket.SocketServer(port)
   local self = {};
 
+  modem.open(port);
+
   self.port = port;
   self.isOpen = false;
   self.address = false;
+  self.filter = socket.filterIncoming(port);
 
   --Manually set the pointer to functions
-  self.consume = socket.__Socket.consume;
+  self.onReady = socket.__SocketServer.onReady;
   self.clean = socket.__Socket.clean;
   self.onClose = socket.__Socket.onClose;
   self.close = socket.__Socket.close;
   self.send = socket.__Socket.send;
   self.sendRaw = socket.__Socket.sendRaw;
   self.listen = socket.__SocketServer.listen;
-
-  self._handler = function(evt, localAddr, remoteAddr, port, distance, payload)
-    if (not self.address and payload:sub(1,1) == 'O') then
-      self.address = remoteAddr;
-      self.isOpen = true;
-    elseif (remoteAddr == self.address and port == self.port) then
-      local h = payload:sub(1,1);
-      if (h == 'C') then
-        self:clean();
-        if (self.onCloseHandler) then
-          self:onCloseHandler();
-        end
-      elseif (h == 'M') then
-        self:consume(payload, distance);
-      else
-        error('Uncaught error: "'..h..'" is not a valid header for the packet.');
-      end
-    end
-    -- Else ignore the handler.
-  end
+  self.pullEvent = socket.__SocketServer.pullEvent;
 
   return self;
 end
