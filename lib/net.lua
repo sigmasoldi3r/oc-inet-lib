@@ -3,29 +3,12 @@
   Argochamber data transfer protocol - Similar to HTTP
   No modes, only arbitrary headers.
 --]]
-local modem = require('component').modem;
 local dns = require('dns');
-local event = require('event');
+local socket = require('socket');
+local json = require('serialization');
 local net = {};
 
 local DEFAULT_ADTP_PORT = 80;
-
---[[--
-  Generator function that makes a port filtering function for modem messages.
-  @param {number} port
-  @returns {function}
---]]--
-local function portFilter(filterPort)
-  return function(msg, _, _, port)
-    if (msg ~= 'modem_message') then
-      return false;
-    end;
-    if (port ~= filterPort) then
-      return false;
-    end
-    return true;
-  end
-end
 
 --[[--
   Compiles headers into a single string the headers for the request.
@@ -42,21 +25,26 @@ end
 
 --[[--
   Parses request options.
+  @param {table} options
+  @param {number} contentLength
 --]]--
-function net.parseRequestOptions(options, content)
+function net.parseRequestOptions(options, contentLength)
   options.port = options.port or DEFAULT_ADTP_PORT;
   options.address = dns.get(options.address) or options.address;
   options.headers = options.headers or {};
   options.headers['Content-Type'] = options.headers['Content-Type'] or 'text';
-  options.headers['Content-Length'] = options.headers['Content-Length'] or content:len();
+  options.headers['Content-Length'] = options.headers['Content-Length'] or contentLength or 0;
   options.rawHeaders = net.compileHeaders(options.headers);
 end
 
 --[[--
   Compiles the body for the ADTP
 --]]--
-function net.compileBody(options, content)
-  return 'ADTP-1.0 '..tostring(options.mode or 'GET')..' '..tostring(options.port)..'\n'..options.rawHeaders..'\n'..tostring(content);
+function net.compileBody(options)
+  return 'ADTP-1.0 '
+    ..tostring(options.mode or 'GET')..' '
+    ..tostring(options.port)..'\n'
+    ..options.rawHeaders..'\n';
 end
 
 --[[--
@@ -123,74 +111,104 @@ end
 --]]--
 function net.parseRequest(raw)
   local protocol, slice = net.parseProtocol(raw);
-  local headers, index = net.parseHeaders(slice);
-  local body = net.getBody(slice, index);
-  return body, headers, protocol;
+  local headers = net.parseHeaders(slice);
+  return headers, protocol;
 end
 
 --[[--
   Creates a request to a server.
   @param {table} options
   @param {string} content
-  @param {function} resolve
-  @param {function} reject
 --]]--
-function net.request(options, content, resolve, reject)
-  net.parseRequestOptions(options, content);
-  modem.open(options.port);
-  modem.send(options.address, options.port, net.compileBody(options, content));
-  local _, _, _, _, _, response = event.pullFiltered(portFilter(options.port));
-  local body, headers, meta = net.parseRequest(response);
-  resolve(body, headers, meta);
+function net.request(options, content)
+  net.parseRequestOptions(options, content and content:len() or 0);
+  local com = socket.Socket(options.address, options.port);
+  local head = net.compileBody(options);
+  com:open();
+  local rhead = com:send(head);
+  local headers, protocol = net.parseRequest(rhead);
+  -- Start body consumption
+  local body = {};
+  while (com.isOpen) do
+    local resp = com:send('true');
+    if (resp) then
+      body[#body + 1] = resp;
+    end
+  end
+  return table.concat(body), headers, protocol;
+end
+
+local PACKET_SIZE = 8180;
+
+--[[--
+  Returns the value of the packet's size for this library.
+  Gives the amount of bytes sent at maximum in each stream cycle.
+  @returns {number}
+--]]--
+function net.getPacketSize()
+  return PACKET_SIZE;
 end
 
 --[[--
-  class Response.
+  Prototype: Response.
+  This class prototype is a proxy object for the socket client class.
+  Allows safe chunked data transfer from server to clients, avoiding the
+  problem of the packet size limit.
+  @param {Socket} socket
 --]]--
-function net.Response(server, client, port)
+function net.Response(client)
   local this = {};
-  
-  this.headers = {
-    ['Content-Type'] = 'text',
-    ['Content-Length'] = 0
-  };
-  
+
   --[[--
-    Sets a response's header.
-    @param {string} k
-    @param {any} v
+    @override
   --]]--
-  function this.setHeader(k, v)
-    this.headers[k] = v;
+  function this.close(_)
+    client:close();
   end
-  
+
   --[[--
-    Sends the response data and ends the transaction.
-    The data is compiled using request's symmetric compiler.
-    @param {string} data
+    @override
   --]]--
-  function this.send(data)
-    local options = {
-      port = port,
-      address = client,
-      rawHeaders = net.compileHeaders(this.headers)
-    };
-    modem.send(client, port, net.compileBody(options, data));
+  function this.sendRaw(_, msg)
+    client:send(msg);
   end
-  
+
+  --[[--
+    This function overrides the default socket's implementation, making it
+    safer to access and use, specially if 'data' exceeds the packet size limit.
+    @param {any} data
+    @override
+  --]]--
+  function this:send(data)
+    if (type(data) == 'table') then
+      data = json.serialize(data);
+    else
+      data = tostring(data);
+    end
+    for i=1, data:len(), net.getPacketSize() do
+      local sub;
+      local offset = i ~= 1 and 1 or 0;
+      if (i + net.getPacketSize() > data:len()) then
+        sub = data:sub(i + offset, data:len());
+      else
+        sub = data:sub(i + offset, i+net.getPacketSize());
+      end
+      self:sendRaw(sub);
+    end
+  end
+
   return this;
 end
 
 --[[--
   class Request.
 --]]--
-function net.Request(body, headers, protocol)
+function net.Request(headers, protocol)
   local this = {};
-  
-  this.body = body;
+
   this.headers = headers;
   this.protocol = protocol;
-  
+
   return this;
 end
 
@@ -201,12 +219,26 @@ end
 --]]--
 function net.createServer(handle, port)
   port = port or DEFAULT_ADTP_PORT;
-  modem.open(port);
   while (true) do
-    local _, server, client, _, distance, raw = event.pullFiltered(portFilter(port));
-    local res = net.Response(server, client, port);
-    local req = net.Request(net.parseRequest(raw));
-    handle(req, res);
+    local sv = socket.SocketServer(port);
+    sv:listen(function(client)
+      local opts = {
+        mode = 'GET',
+        port = port,
+        headers = {}
+      };
+      net.parseRequestOptions(opts);
+      local phead = net.compileBody(opts);
+      local rhead = client:send(phead);
+      local req = net.Request(net.parseRequest(rhead));
+      local res = net.Response(client);
+      handle(req, res);
+    end);
+    ---------------------------------------
+    --local _, server, client, _, distance, raw = event.pullFiltered(portFilter(port));
+    --local res = net.Response(server, client, port);
+    --local req = net.Request(net.parseRequest(rhead));
+    --handle(req, res);
   end
 end
 
