@@ -12,13 +12,14 @@ ofcourse! And may be at some point new things can be added)
 
 # Installation
 
-If you got an internet access card like this ![internet card][icard =64x64] and http is
+If you got an internet access card like this
+<img src="http://ocdoc.cil.li/_media/items:internet_card.png?w=128&tok=d7aa72" width="48">
+and http is
 enabled on the server, all what you have to do is copy the below command and
 press insert in your computer, then enter:
 
 `wget https://raw.githubusercontent.com/sigmasoldi3r/oc-lan/master/web-installer.lua && web-installer && rm web-installer.lua`
 
-[icard]: http://ocdoc.cil.li/_media/items:internet_card.png?w=128&tok=d7aa72
 
 # UPDATE: Below is pending on change
 
