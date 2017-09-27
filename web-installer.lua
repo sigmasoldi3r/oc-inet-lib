@@ -18,7 +18,8 @@ print('Loading web assets...');
 local files = {
   ['dns.lua'] = 'https://raw.githubusercontent.com/sigmasoldi3r/oc-inet-lib/master/lib/dns.lua',
   ['dns_remote.lua'] = 'https://raw.githubusercontent.com/sigmasoldi3r/oc-inet-lib/master/lib/dns_remote.lua',
-  ['net.lua'] = 'https://raw.githubusercontent.com/sigmasoldi3r/oc-inet-lib/master/lib/net.lua'
+  ['net.lua'] = 'https://raw.githubusercontent.com/sigmasoldi3r/oc-inet-lib/master/lib/net.lua',
+  ['socket.lua'] = 'https://raw.githubusercontent.com/sigmasoldi3r/oc-lan/master/lib/socket.lua'
 };
 
 print('Downloading files...');
