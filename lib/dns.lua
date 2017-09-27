@@ -15,6 +15,13 @@ local BLANK_TABLE_SER = '{}';
   @returns {File}
 --]]--
 function dns.openDB(mode)
+  local f = io.open(LOCAL_TABLE, 'r');
+  if (not f) then
+    io.close(f);
+    local f2 = io.open(LOCAL_TABLE, 'w');
+    f2:write('{}');
+    f2:close();
+  end
   return io.open(LOCAL_TABLE, mode or 'r');
 end
 
@@ -37,9 +44,9 @@ end
 --]]--
 function dns.getAll()
   local file = dns.openDB();
-  local data = file:read('*a');
-  data = json.unserialize(data);
+  local data = file:read('*all');
   file:close();
+  data = json.unserialize(data) or {};
   return data;
 end
 
