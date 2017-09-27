@@ -12,7 +12,7 @@ ofcourse! And may be at some point new things can be added)
 
 # Installation
 
-If you got an internet access card like this ![internet card][icard] and http is
+If you got an internet access card like this ![internet card][icard =64x64] and http is
 enabled on the server, all what you have to do is copy the below command and
 press insert in your computer, then enter:
 
