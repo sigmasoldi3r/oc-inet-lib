@@ -43,7 +43,7 @@ end
 function net.compileBody(options)
   return 'ADTP-1.0 '
     ..tostring(options.mode or 'GET')..' '
-    ..tostring(options.port)..'\n'
+    ..tostring(options.code or 200)..'\n'
     ..options.rawHeaders..'\n';
 end
 
@@ -88,7 +88,7 @@ function net.parseProtocol(raw)
   protocol.name = p[1];
   protocol.version = p[2];
   protocol.mode = p[3];
-  protocol.port = p[4];
+  protocol.code = p[4];
   local slice = raw:gsub('^.-\n(.*)', '%1');
   return protocol, slice;
 end
@@ -159,6 +159,11 @@ end
 function net.Response(client)
   local this = {};
 
+  function this.setHeader(_, key, value)
+    client.headers = client.headers or {};
+    client.headers[key] = value;
+  end
+
   --[[--
     @override
   --]]--
@@ -225,6 +230,7 @@ function net.createServer(handle, port)
       local opts = {
         mode = 'GET',
         port = port,
+        code = 200,
         headers = {}
       };
       net.parseRequestOptions(opts);
