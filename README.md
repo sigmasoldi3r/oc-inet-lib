@@ -1,3 +1,9 @@
+# DEPRECATION NOTICE
+
+This project has been archived before finishing, in spite of making a more robust Api. See [AMXP Lib](http://git.argochamber.com/opencomputers/amxp-lib).
+
+* * *
+
 # OC LAN framework
 
 Opencomputers Local Area Networking framework
